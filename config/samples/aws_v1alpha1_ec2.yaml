@@ -1,0 +1,12 @@
+apiVersion: aws.kraken-iac.eoinfennessy.com/v1alpha1
+kind: EC2
+metadata:
+  labels:
+    app.kubernetes.io/name: ec2
+    app.kubernetes.io/instance: ec2-sample
+    app.kubernetes.io/part-of: aws-ec2
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: aws-ec2
+  name: ec2-sample
+spec:
+  # TODO(user): Add fields here

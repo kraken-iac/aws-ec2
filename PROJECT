@@ -7,4 +7,14 @@ layout:
 - go.kubebuilder.io/v4
 projectName: aws-ec2
 repo: github.com/kraken-iac/aws-ec2
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: kraken-iac.eoinfennessy.com
+  group: aws
+  kind: EC2
+  path: github.com/kraken-iac/aws-ec2/api/v1alpha1
+  version: v1alpha1
 version: "3"

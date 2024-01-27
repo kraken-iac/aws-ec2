@@ -1,0 +1,31 @@
+# permissions for end users to edit ec2s.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/name: clusterrole
+    app.kubernetes.io/instance: ec2-editor-role
+    app.kubernetes.io/component: rbac
+    app.kubernetes.io/created-by: aws-ec2
+    app.kubernetes.io/part-of: aws-ec2
+    app.kubernetes.io/managed-by: kustomize
+  name: ec2-editor-role
+rules:
+- apiGroups:
+  - aws.kraken-iac.eoinfennessy.com
+  resources:
+  - ec2s
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - aws.kraken-iac.eoinfennessy.com
+  resources:
+  - ec2s/status
+  verbs:
+  - get
