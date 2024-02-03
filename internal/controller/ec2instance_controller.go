@@ -24,29 +24,29 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
-	awsv1alpha1 "github.com/kraken-iac/aws-ec2/api/v1alpha1"
+	awsv1alpha1 "github.com/kraken-iac/aws-ec2-instance/api/v1alpha1"
 )
 
-// EC2Reconciler reconciles a EC2 object
-type EC2Reconciler struct {
+// EC2InstanceReconciler reconciles a EC2Instance object
+type EC2InstanceReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 }
 
-//+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2s,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2s/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2s/finalizers,verbs=update
+//+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2instances,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2instances/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2instances/finalizers,verbs=update
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 // TODO(user): Modify the Reconcile function to compare the state specified by
-// the EC2 object against the actual cluster state, and then
+// the EC2Instance object against the actual cluster state, and then
 // perform operations to make the cluster state reflect the state specified by
 // the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.3/pkg/reconcile
-func (r *EC2Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	_ = log.FromContext(ctx)
 
 	// TODO(user): your logic here
@@ -55,8 +55,8 @@ func (r *EC2Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *EC2Reconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *EC2InstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&awsv1alpha1.EC2{}).
+		For(&awsv1alpha1.EC2Instance{}).
 		Complete(r)
 }

@@ -5,8 +5,8 @@
 domain: kraken-iac.eoinfennessy.com
 layout:
 - go.kubebuilder.io/v4
-projectName: aws-ec2
-repo: github.com/kraken-iac/aws-ec2
+projectName: aws-ec2-instance
+repo: github.com/kraken-iac/aws-ec2-instance
 resources:
 - api:
     crdVersion: v1
@@ -14,7 +14,7 @@ resources:
   controller: true
   domain: kraken-iac.eoinfennessy.com
   group: aws
-  kind: EC2
-  path: github.com/kraken-iac/aws-ec2/api/v1alpha1
+  kind: EC2Instance
+  path: github.com/kraken-iac/aws-ec2-instance/api/v1alpha1
   version: v1alpha1
 version: "3"

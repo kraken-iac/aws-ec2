@@ -1,20 +1,20 @@
-# permissions for end users to view ec2s.
+# permissions for end users to view ec2instances.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/name: clusterrole
-    app.kubernetes.io/instance: ec2-viewer-role
+    app.kubernetes.io/instance: ec2instance-viewer-role
     app.kubernetes.io/component: rbac
-    app.kubernetes.io/created-by: aws-ec2
-    app.kubernetes.io/part-of: aws-ec2
+    app.kubernetes.io/created-by: aws-ec2-instance
+    app.kubernetes.io/part-of: aws-ec2-instance
     app.kubernetes.io/managed-by: kustomize
-  name: ec2-viewer-role
+  name: ec2instance-viewer-role
 rules:
 - apiGroups:
   - aws.kraken-iac.eoinfennessy.com
   resources:
-  - ec2s
+  - ec2instances
   verbs:
   - get
   - list
@@ -22,6 +22,6 @@ rules:
 - apiGroups:
   - aws.kraken-iac.eoinfennessy.com
   resources:
-  - ec2s/status
+  - ec2instances/status
   verbs:
   - get
