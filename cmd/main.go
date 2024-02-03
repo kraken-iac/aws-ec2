@@ -32,8 +32,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	awsv1alpha1 "github.com/kraken-iac/aws-ec2/api/v1alpha1"
-	"github.com/kraken-iac/aws-ec2/internal/controller"
+	awsv1alpha1 "github.com/kraken-iac/aws-ec2-instance/api/v1alpha1"
+	"github.com/kraken-iac/aws-ec2-instance/internal/controller"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -71,7 +71,7 @@ func main() {
 		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "2bf6233f.kraken-iac.eoinfennessy.com",
+		LeaderElectionID:       "37d43671.kraken-iac.eoinfennessy.com",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
@@ -89,11 +89,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controller.EC2Reconciler{
+	if err = (&controller.EC2InstanceReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "EC2")
+		setupLog.Error(err, "unable to create controller", "controller", "EC2Instance")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

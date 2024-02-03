@@ -1,4 +1,4 @@
-module github.com/kraken-iac/aws-ec2
+module github.com/kraken-iac/aws-ec2-instance
 
 go 1.20
 
