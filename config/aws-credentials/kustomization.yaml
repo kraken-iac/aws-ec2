@@ -1,0 +1,9 @@
+namespace: aws-ec2-instance-system
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+secretGenerator:
+- envs:
+  - aws-credentials.env
+  name: aws-credentials
