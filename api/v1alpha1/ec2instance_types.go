@@ -25,11 +25,17 @@ import (
 
 // EC2InstanceSpec defines the desired state of EC2Instance
 type EC2InstanceSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	ImageId      string `json:"imageId"`
+	InstanceType string `json:"instanceType"`
 
-	// Foo is an example field of EC2Instance. Edit ec2instance_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	//+kubebuilder:validation:Minimum=1
+	MaxCount int `json:"maxCount"`
+
+	//+kubebuilder:validation:Minimum=1
+	MinCount int `json:"minCount"`
+
+	// +optional
+	Tags map[string]string `json:"tags,omitempty"`
 }
 
 // EC2InstanceStatus defines the observed state of EC2Instance
