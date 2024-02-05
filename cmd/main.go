@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
 
@@ -34,6 +35,7 @@ import (
 
 	awsv1alpha1 "github.com/kraken-iac/aws-ec2-instance/api/v1alpha1"
 	"github.com/kraken-iac/aws-ec2-instance/internal/controller"
+	ec2instanceclient "github.com/kraken-iac/aws-ec2-instance/pkg/ec2instance_client"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -89,9 +91,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	ec2InstanceClient, err := ec2instanceclient.New(context.Background(), "us-east-1")
+	if err != nil {
+		setupLog.Error(err, "unable to create client", "client", "EC2InstanceClient")
+		os.Exit(1)
+	}
+
 	if err = (&controller.EC2InstanceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		EC2InstanceClient: ec2InstanceClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "EC2Instance")
 		os.Exit(1)
