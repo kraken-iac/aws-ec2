@@ -105,7 +105,11 @@ func (c ec2InstanceClient) GetInstances(ctx context.Context, filterOptions Filte
 	return instances, nil
 }
 
-func (c ec2InstanceClient) TerminateInstances(ctx context.Context, instanceIds []string) (*ec2.TerminateInstancesOutput, error) {
+func (c ec2InstanceClient) TerminateInstances(ctx context.Context, instances []types.Instance) (*ec2.TerminateInstancesOutput, error) {
+	instanceIds := make([]string, len(instances))
+	for i, inst := range instances {
+		instanceIds[i] = *inst.InstanceId
+	}
 	o, err := c.ec2Client.TerminateInstances(ctx, &ec2.TerminateInstancesInput{InstanceIds: instanceIds})
 	return o, err
 }

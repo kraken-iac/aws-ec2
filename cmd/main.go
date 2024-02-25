@@ -100,6 +100,7 @@ func main() {
 	if err = (&controller.EC2InstanceReconciler{
 		Client:            mgr.GetClient(),
 		Scheme:            mgr.GetScheme(),
+		Recorder:          mgr.GetEventRecorderFor("ec2instance-controller"),
 		EC2InstanceClient: ec2InstanceClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "EC2Instance")

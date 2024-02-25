@@ -35,8 +35,6 @@ spec:
             description: EC2InstanceSpec defines the desired state of EC2Instance
             properties:
               imageId:
-                description: Foo is an example field of EC2Instance. Edit ec2instance_types.go
-                  to remove/update
                 type: string
               instanceType:
                 type: string
