@@ -9,4 +9,7 @@ metadata:
     app.kubernetes.io/created-by: aws-ec2-instance
   name: ec2instance-sample
 spec:
-  # TODO(user): Add fields here
+  imageId: "ami-0277155c3f0ab2930"
+  instanceType: "t2.nano"
+  maxCount: 1
+  minCount: 1

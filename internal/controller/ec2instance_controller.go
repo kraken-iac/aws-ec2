@@ -18,19 +18,42 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	awsv1alpha1 "github.com/kraken-iac/aws-ec2-instance/api/v1alpha1"
+	ec2instanceclient "github.com/kraken-iac/aws-ec2-instance/pkg/ec2instance_client"
 )
+
+const (
+	ec2InstanceFinalizer string = "aws.kraken-iac.eoinfennessy.com/ec2-instance-finalizer"
+
+	nameTagKey      string = "kraken-name"
+	namespaceTagKey string = "kraken-namespace"
+)
+
+type EC2InstanceClient interface {
+	RunInstances(ctx context.Context, params *ec2instanceclient.RunInstancesInput) (*ec2.RunInstancesOutput, error)
+	GetInstances(ctx context.Context, filterOptions ec2instanceclient.FilterOptions) ([]types.Instance, error)
+	TerminateInstances(ctx context.Context, instances []types.Instance) (*ec2.TerminateInstancesOutput, error)
+}
 
 // EC2InstanceReconciler reconciles a EC2Instance object
 type EC2InstanceReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
+	EC2InstanceClient
 }
 
 //+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2instances,verbs=get;list;watch;create;update;patch;delete
@@ -47,11 +70,150 @@ type EC2InstanceReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.16.3/pkg/reconcile
 func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
+	log := log.FromContext(ctx)
+	log.Info("Reconcile triggered")
 
-	// TODO(user): your logic here
+	// Fetch ec2Instance resource
+	ec2Instance := &awsv1alpha1.EC2Instance{}
+	if err := r.Client.Get(ctx, req.NamespacedName, ec2Instance); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("ec2Instance resource not found: Ignoring because it must have been deleted")
+			return ctrl.Result{}, nil
+		} else {
+			log.Error(err, "Failed to fetch ec2Instance resource: Requeuing")
+			return ctrl.Result{}, err
+		}
+	}
+
+	// TODO: Add unknown status condition if none present
+
+	// Add finalizer if not present
+	if !controllerutil.ContainsFinalizer(ec2Instance, ec2InstanceFinalizer) {
+		log.Info("Adding finalizer for EC2Instance")
+		if ok := controllerutil.AddFinalizer(ec2Instance, ec2InstanceFinalizer); !ok {
+			log.Info("Did not add finalizer to EC2Instance as it already exists")
+			return ctrl.Result{Requeue: true}, nil
+		}
+
+		if err := r.Update(ctx, ec2Instance); err != nil {
+			log.Error(err, "Failed to update EC2Instance to add finalizer")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Handle deletion
+	if isMarkedForDeletion(ec2Instance) && controllerutil.ContainsFinalizer(ec2Instance, ec2InstanceFinalizer) {
+		log.Info("Performing finalizer operations for EC2Instance before deletion")
+
+		if err := r.doFinalizerOperations(ctx, req, ec2Instance); err != nil {
+			log.Error(err, "Failed to perform finalizer operations on EC2Instance")
+			return ctrl.Result{}, err
+		}
+
+		log.Info("Removing finalizer for EC2Instance")
+		if ok := controllerutil.RemoveFinalizer(ec2Instance, ec2InstanceFinalizer); !ok {
+			log.Info("Did not remove finalizer from EC2Instance as it is not present")
+			return ctrl.Result{Requeue: true}, nil
+		}
+
+		if err := r.Update(ctx, ec2Instance); err != nil {
+			log.Error(err, "Failed to update EC2Instance after removing finalizer")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	// Get running and pending instances matching name and namespace tags
+	log.Info("Retrieving EC2 instances", "name", req.Name, "namespace", req.Namespace)
+	instances, err := r.EC2InstanceClient.GetInstances(ctx, ec2instanceclient.FilterOptions{
+		MatchTags: map[string]string{
+			nameTagKey:      req.Name,
+			namespaceTagKey: req.Namespace,
+		},
+		MatchStates: []types.InstanceStateName{
+			types.InstanceStateNamePending,
+			types.InstanceStateNameRunning,
+		},
+	})
+	if err != nil {
+		log.Error(err, "Failed to retrieve EC2 instances.")
+		return ctrl.Result{}, err
+	}
+
+	// TODO: check if desired state has been achieved. If no updates required, update status and requeue after some time
+	// if some instances are pending. Add time to requeue for self-heal check if state is as desired.
+
+	// TODO: compare all instances to spec and either update (if possible) or terminate those that do not match
+
+	// Scale down
+	if len(instances) > ec2Instance.Spec.MaxCount {
+		log.Info("Scaling down EC2 instances")
+		terminationCount := len(instances) - ec2Instance.Spec.MaxCount
+		if _, err := r.EC2InstanceClient.TerminateInstances(ctx, instances[:terminationCount]); err != nil {
+			log.Error(err, "Failed to terminate EC2 instances")
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Scale up
+	if len(instances) < ec2Instance.Spec.MaxCount {
+		log.Info("Scaling up EC2 instances")
+
+		maxCount, minCount := adjustMaxMinInstanceCount(
+			len(instances),
+			ec2Instance.Spec.MaxCount,
+			ec2Instance.Spec.MinCount,
+		)
+
+		tags := makeInstanceTags(req, ec2Instance.Spec.Tags)
+
+		o, err := r.EC2InstanceClient.RunInstances(ctx, &ec2instanceclient.RunInstancesInput{
+			MaxCount:     maxCount,
+			MinCount:     minCount,
+			ImageId:      ec2Instance.Spec.ImageId,
+			InstanceType: ec2Instance.Spec.InstanceType,
+			Tags:         tags,
+		})
+		if err != nil {
+			log.Error(err, "Failed to run instances")
+			return ctrl.Result{}, err
+		}
+		log.Info("Created instances", "instanceCount", len(o.Instances))
+	}
 
 	return ctrl.Result{}, nil
+}
+
+func (r *EC2InstanceReconciler) doFinalizerOperations(
+	ctx context.Context, req ctrl.Request, ec2Instance *awsv1alpha1.EC2Instance,
+) error {
+	log := log.FromContext(ctx)
+
+	log.Info("Retrieving EC2 instances")
+	instances, err := r.EC2InstanceClient.GetInstances(ctx, ec2instanceclient.FilterOptions{
+		MatchTags: map[string]string{
+			nameTagKey:      req.Name,
+			namespaceTagKey: req.Namespace,
+		},
+	})
+	if err != nil {
+		log.Error(err, "Failed to retrieve EC2 instances")
+		return err
+	}
+
+	log.Info("Terminating EC2 instances")
+	if _, err := r.EC2InstanceClient.TerminateInstances(ctx, instances); err != nil {
+		log.Error(err, "Failed to terminate EC2 instances")
+		return err
+	}
+
+	r.Recorder.Event(ec2Instance, "Warning", "Deleting",
+		fmt.Sprintf("EC2Instance %s is being deleted from the namespace %s",
+			ec2Instance.Name,
+			ec2Instance.Namespace),
+	)
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -59,4 +221,28 @@ func (r *EC2InstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&awsv1alpha1.EC2Instance{}).
 		Complete(r)
+}
+
+func adjustMaxMinInstanceCount(current, max, min int) (newMax, newMin int) {
+	newMax = max - current
+	if min-current < 1 {
+		newMin = 1
+	} else {
+		newMin = min - current
+	}
+	return newMax, newMin
+}
+
+func makeInstanceTags(req reconcile.Request, specTags map[string]string) map[string]string {
+	tags := make(map[string]string, len(specTags)+2)
+	for tagKey, tagVal := range specTags {
+		tags[tagKey] = tagVal
+	}
+	tags[nameTagKey] = req.Name
+	tags[namespaceTagKey] = req.Namespace
+	return tags
+}
+
+func isMarkedForDeletion(ec2Instance *awsv1alpha1.EC2Instance) bool {
+	return ec2Instance.DeletionTimestamp != nil
 }
