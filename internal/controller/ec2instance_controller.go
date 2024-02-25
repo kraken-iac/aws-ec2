@@ -21,6 +21,8 @@ import (
 	"fmt"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -40,6 +42,8 @@ const (
 
 	nameTagKey      string = "kraken-name"
 	namespaceTagKey string = "kraken-namespace"
+
+	conditionTypeReady string = "Ready"
 )
 
 type EC2InstanceClient interface {
@@ -59,6 +63,7 @@ type EC2InstanceReconciler struct {
 //+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2instances,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2instances/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2instances/finalizers,verbs=update
+//+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -85,18 +90,36 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	// TODO: Add unknown status condition if none present
+	// Add initial status conditions if not present
+	if ec2Instance.Status.Conditions == nil || len(ec2Instance.Status.Conditions) == 0 {
+		log.Info("Setting initial status conditions for ec2Instance")
+		meta.SetStatusCondition(
+			&ec2Instance.Status.Conditions,
+			metav1.Condition{
+				Type:    conditionTypeReady,
+				Status:  metav1.ConditionUnknown,
+				Reason:  "Reconciling",
+				Message: "Initial reconciliation",
+			},
+		)
+
+		if err := r.Status().Update(ctx, ec2Instance); err != nil {
+			log.Error(err, "Failed to update ec2Instance status")
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
 
 	// Add finalizer if not present
 	if !controllerutil.ContainsFinalizer(ec2Instance, ec2InstanceFinalizer) {
-		log.Info("Adding finalizer for EC2Instance")
+		log.Info("Adding finalizer for ec2Instance")
 		if ok := controllerutil.AddFinalizer(ec2Instance, ec2InstanceFinalizer); !ok {
-			log.Info("Did not add finalizer to EC2Instance as it already exists")
+			log.Info("Did not add finalizer to ec2Instance as it already exists")
 			return ctrl.Result{Requeue: true}, nil
 		}
 
 		if err := r.Update(ctx, ec2Instance); err != nil {
-			log.Error(err, "Failed to update EC2Instance to add finalizer")
+			log.Error(err, "Failed to update ec2Instance to add finalizer")
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
@@ -104,21 +127,21 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Handle deletion
 	if isMarkedForDeletion(ec2Instance) && controllerutil.ContainsFinalizer(ec2Instance, ec2InstanceFinalizer) {
-		log.Info("Performing finalizer operations for EC2Instance before deletion")
+		log.Info("Performing finalizer operations for ec2Instance before deletion")
 
 		if err := r.doFinalizerOperations(ctx, req, ec2Instance); err != nil {
-			log.Error(err, "Failed to perform finalizer operations on EC2Instance")
+			log.Error(err, "Failed to perform finalizer operations on ec2Instance")
 			return ctrl.Result{}, err
 		}
 
 		log.Info("Removing finalizer for EC2Instance")
 		if ok := controllerutil.RemoveFinalizer(ec2Instance, ec2InstanceFinalizer); !ok {
-			log.Info("Did not remove finalizer from EC2Instance as it is not present")
+			log.Info("Did not remove finalizer from ec2Instance as it is not present")
 			return ctrl.Result{Requeue: true}, nil
 		}
 
 		if err := r.Update(ctx, ec2Instance); err != nil {
-			log.Error(err, "Failed to update EC2Instance after removing finalizer")
+			log.Error(err, "Failed to update ec2Instance after removing finalizer")
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil
@@ -137,14 +160,20 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		},
 	})
 	if err != nil {
-		log.Error(err, "Failed to retrieve EC2 instances.")
-		return ctrl.Result{}, err
+		log.Error(err, "Failed to retrieve EC2 instances")
+		meta.SetStatusCondition(
+			&ec2Instance.Status.Conditions,
+			metav1.Condition{
+				Type:    conditionTypeReady,
+				Status:  metav1.ConditionUnknown,
+				Reason:  "RetrievalFailed",
+				Message: "Failed to retrieve EC2 instances",
+			},
+		)
+		return ctrl.Result{Requeue: true}, r.Update(ctx, ec2Instance)
 	}
 
-	// TODO: check if desired state has been achieved. If no updates required, update status and requeue after some time
-	// if some instances are pending. Add time to requeue for self-heal check if state is as desired.
-
-	// TODO: compare all instances to spec and either update (if possible) or terminate those that do not match
+	// TODO: compare all instances to spec and either update (if possible) or terminate those that do not match (update list)
 
 	// Scale down
 	if len(instances) > ec2Instance.Spec.MaxCount {
@@ -152,7 +181,16 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		terminationCount := len(instances) - ec2Instance.Spec.MaxCount
 		if _, err := r.EC2InstanceClient.TerminateInstances(ctx, instances[:terminationCount]); err != nil {
 			log.Error(err, "Failed to terminate EC2 instances")
-			return ctrl.Result{}, err
+			meta.SetStatusCondition(
+				&ec2Instance.Status.Conditions,
+				metav1.Condition{
+					Type:    conditionTypeReady,
+					Status:  metav1.ConditionFalse,
+					Reason:  "TerminateFailed",
+					Message: "Failed to scale down EC2 instances",
+				},
+			)
+			return ctrl.Result{Requeue: true}, r.Update(ctx, ec2Instance)
 		}
 	}
 
@@ -177,9 +215,37 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		})
 		if err != nil {
 			log.Error(err, "Failed to run instances")
-			return ctrl.Result{}, err
+			meta.SetStatusCondition(
+				&ec2Instance.Status.Conditions,
+				metav1.Condition{
+					Type:    conditionTypeReady,
+					Status:  metav1.ConditionFalse,
+					Reason:  "RunFailed",
+					Message: "Failed to scale up EC2 instances",
+				},
+			)
+			return ctrl.Result{Requeue: true}, r.Update(ctx, ec2Instance)
 		}
 		log.Info("Created instances", "instanceCount", len(o.Instances))
+
+		// TODO: If some instances are pending, wait
+
+	}
+
+	// Update status condition type ready to true
+	meta.SetStatusCondition(
+		&ec2Instance.Status.Conditions,
+		metav1.Condition{
+			Type:    conditionTypeReady,
+			Status:  metav1.ConditionTrue,
+			Reason:  "Reconciled",
+			Message: "Desired state has been reached",
+		},
+	)
+	// TODO: If no change, add time to requeue for self-heal check to ensure state remains as desired.
+	if err := r.Status().Update(ctx, ec2Instance); err != nil {
+		log.Error(err, "Failed to update ec2Instance status")
+		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
