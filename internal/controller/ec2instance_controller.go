@@ -18,8 +18,11 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"time"
 
+	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,6 +38,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	awsv1alpha1 "github.com/kraken-iac/aws-ec2-instance/api/v1alpha1"
 	ec2instanceclient "github.com/kraken-iac/aws-ec2-instance/pkg/ec2instance_client"
+	krakenv1alpha1 "github.com/kraken-iac/kraken/api/v1alpha1"
 )
 
 const (
@@ -49,6 +53,7 @@ const (
 type EC2InstanceClient interface {
 	RunInstances(ctx context.Context, params *ec2instanceclient.RunInstancesInput) (*ec2.RunInstancesOutput, error)
 	GetInstances(ctx context.Context, filterOptions ec2instanceclient.FilterOptions) ([]types.Instance, error)
+	WaitUntilRunning(ctx context.Context, filterOptions ec2instanceclient.FilterOptions, duration time.Duration) error
 	TerminateInstances(ctx context.Context, instances []types.Instance) (*ec2.TerminateInstancesOutput, error)
 }
 
@@ -63,6 +68,7 @@ type EC2InstanceReconciler struct {
 //+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2instances,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2instances/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2instances/finalizers,verbs=update
+//+kubebuilder:rbac:groups=core.kraken-iac.eoinfennessy.com,resources=statedeclarations,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -170,7 +176,7 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				Message: "Failed to retrieve EC2 instances",
 			},
 		)
-		return ctrl.Result{Requeue: true}, r.Update(ctx, ec2Instance)
+		return ctrl.Result{Requeue: true}, r.Status().Update(ctx, ec2Instance)
 	}
 
 	// TODO: compare all instances to spec and either update (if possible) or terminate those that do not match (update list)
@@ -228,8 +234,104 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		log.Info("Created instances", "instanceCount", len(o.Instances))
 
-		// TODO: If some instances are pending, wait
+		// Wait for pending instances to reach running state
+		if err := r.WaitUntilRunning(
+			ctx,
+			ec2instanceclient.FilterOptions{
+				MatchTags: map[string]string{
+					nameTagKey:      req.Name,
+					namespaceTagKey: req.Namespace,
+				},
+				MatchStates: []types.InstanceStateName{
+					types.InstanceStateNamePending,
+					types.InstanceStateNameRunning,
+				},
+			},
+			time.Minute*2,
+		); err != nil {
+			log.Error(err, "Encountered error waiting for running state")
+			meta.SetStatusCondition(
+				&ec2Instance.Status.Conditions,
+				metav1.Condition{
+					Type:    conditionTypeReady,
+					Status:  metav1.ConditionFalse,
+					Reason:  "WaitForRunningError",
+					Message: fmt.Sprintf("Encountered error waiting for running state: %s", err),
+				},
+			)
+			return ctrl.Result{Requeue: true}, r.Status().Update(ctx, ec2Instance)
+		}
+	}
 
+	// Retrieve running instances to use in StateDeclaration data
+	log.Info("Retrieving running EC2 instances", "name", req.Name, "namespace", req.Namespace)
+	instances, err = r.EC2InstanceClient.GetInstances(ctx, ec2instanceclient.FilterOptions{
+		MatchTags: map[string]string{
+			nameTagKey:      req.Name,
+			namespaceTagKey: req.Namespace,
+		},
+		MatchStates: []types.InstanceStateName{
+			types.InstanceStateNameRunning,
+		},
+	})
+	if err != nil {
+		log.Error(err, "Failed to retrieve EC2 instances")
+		meta.SetStatusCondition(
+			&ec2Instance.Status.Conditions,
+			metav1.Condition{
+				Type:    conditionTypeReady,
+				Status:  metav1.ConditionUnknown,
+				Reason:  "RetrievalFailed",
+				Message: "Failed to retrieve EC2 instances",
+			},
+		)
+		return ctrl.Result{Requeue: true}, r.Status().Update(ctx, ec2Instance)
+	}
+
+	// Construct StateDeclaration data
+	stateDeclarationData, err := constructStateDeclarationData(*ec2Instance, instances)
+	if err != nil {
+		log.Error(err, "Could not convert to StateDeclaration data")
+		return ctrl.Result{}, err
+	}
+
+	// Create or update StateDeclaration
+	stateDeclaration := &krakenv1alpha1.StateDeclaration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "ec2-" + req.Name,
+			Namespace: req.Namespace,
+		},
+	}
+
+	if err := controllerutil.SetControllerReference(
+		ec2Instance,
+		stateDeclaration,
+		r.Scheme); err != nil {
+		log.Error(err, "Failed to set owner reference on StateDeclaration")
+		return reconcile.Result{}, err
+	}
+
+	if result, err := controllerutil.CreateOrUpdate(
+		ctx,
+		r.Client,
+		stateDeclaration,
+		func() error {
+			stateDeclaration.Spec.Data = *stateDeclarationData
+			return nil
+		}); err != nil {
+		log.Error(err, "Failed to create or update StateDeclaration")
+		meta.SetStatusCondition(
+			&ec2Instance.Status.Conditions,
+			metav1.Condition{
+				Type:    conditionTypeReady,
+				Status:  metav1.ConditionFalse,
+				Reason:  "StateDeclarationError",
+				Message: fmt.Sprintf("Failed to create/update StateDeclaration: %s", err),
+			},
+		)
+		return ctrl.Result{}, r.Status().Update(ctx, ec2Instance)
+	} else {
+		log.Info("Created/updated StateDeclaration", "operationResult", string(result))
 	}
 
 	// Update status condition type ready to true
@@ -286,6 +388,7 @@ func (r *EC2InstanceReconciler) doFinalizerOperations(
 func (r *EC2InstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&awsv1alpha1.EC2Instance{}).
+		Owns(&krakenv1alpha1.StateDeclaration{}).
 		Complete(r)
 }
 
@@ -311,4 +414,19 @@ func makeInstanceTags(req reconcile.Request, specTags map[string]string) map[str
 
 func isMarkedForDeletion(ec2Instance *awsv1alpha1.EC2Instance) bool {
 	return ec2Instance.DeletionTimestamp != nil
+}
+
+func constructStateDeclarationData(ec2Instance awsv1alpha1.EC2Instance, instances []types.Instance) (*v1.JSON, error) {
+	dataMap := make(map[string]interface{})
+	dataMap["instances"] = instances
+	dataMap["spec"] = ec2Instance.Spec
+
+	dataJSON, err := json.Marshal(dataMap)
+	if err != nil {
+		return nil, err
+	}
+
+	stateDeclarationData := v1.JSON{}
+	stateDeclarationData.Raw = dataJSON
+	return &stateDeclarationData, nil
 }

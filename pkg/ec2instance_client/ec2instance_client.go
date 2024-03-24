@@ -2,6 +2,7 @@ package ec2instanceclient
 
 import (
 	"context"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -83,15 +84,7 @@ func (f FilterOptions) toFilters() []types.Filter {
 
 func (c ec2InstanceClient) GetInstances(ctx context.Context, filterOptions FilterOptions) ([]types.Instance, error) {
 	filters := filterOptions.toFilters()
-
-	var describeInstancesInput ec2.DescribeInstancesInput
-	if len(filters) > 0 {
-		describeInstancesInput = ec2.DescribeInstancesInput{
-			Filters: filters,
-		}
-	} else {
-		describeInstancesInput = ec2.DescribeInstancesInput{}
-	}
+	describeInstancesInput := constructDescribeInstancesInput(filters)
 
 	describeInstancesoutput, err := c.ec2Client.DescribeInstances(ctx, &describeInstancesInput)
 	if err != nil {
@@ -103,6 +96,14 @@ func (c ec2InstanceClient) GetInstances(ctx context.Context, filterOptions Filte
 		instances = append(instances, r.Instances...)
 	}
 	return instances, nil
+}
+
+func (c ec2InstanceClient) WaitUntilRunning(ctx context.Context, filterOptions FilterOptions, duration time.Duration) error {
+	filters := filterOptions.toFilters()
+	describeInstancesInput := constructDescribeInstancesInput(filters)
+
+	waiter := ec2.NewInstanceRunningWaiter(c.ec2Client)
+	return waiter.Wait(ctx, &describeInstancesInput, *aws.Duration(duration))
 }
 
 func (c ec2InstanceClient) TerminateInstances(ctx context.Context, instances []types.Instance) (*ec2.TerminateInstancesOutput, error) {
@@ -125,4 +126,16 @@ func mapToTags(m map[string]string) []types.Tag {
 		i++
 	}
 	return tags
+}
+
+func constructDescribeInstancesInput(filters []types.Filter) ec2.DescribeInstancesInput {
+	var describeInstancesInput ec2.DescribeInstancesInput
+	if len(filters) > 0 {
+		describeInstancesInput = ec2.DescribeInstancesInput{
+			Filters: filters,
+		}
+	} else {
+		describeInstancesInput = ec2.DescribeInstancesInput{}
+	}
+	return describeInstancesInput
 }
