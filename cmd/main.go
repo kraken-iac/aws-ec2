@@ -36,6 +36,7 @@ import (
 	awsv1alpha1 "github.com/kraken-iac/aws-ec2-instance/api/v1alpha1"
 	"github.com/kraken-iac/aws-ec2-instance/internal/controller"
 	ec2instanceclient "github.com/kraken-iac/aws-ec2-instance/pkg/ec2instance_client"
+	krakenv1alpha1 "github.com/kraken-iac/kraken/api/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -46,8 +47,8 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-
 	utilruntime.Must(awsv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(krakenv1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 

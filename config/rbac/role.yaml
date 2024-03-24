@@ -37,3 +37,15 @@ rules:
   verbs:
   - create
   - patch
+- apiGroups:
+  - core.kraken-iac.eoinfennessy.com
+  resources:
+  - statedeclarations
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
