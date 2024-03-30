@@ -40,6 +40,18 @@ rules:
 - apiGroups:
   - core.kraken-iac.eoinfennessy.com
   resources:
+  - dependencyrequests
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - core.kraken-iac.eoinfennessy.com
+  resources:
   - statedeclarations
   verbs:
   - create

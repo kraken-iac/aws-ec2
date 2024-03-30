@@ -34,22 +34,176 @@ spec:
           spec:
             description: EC2InstanceSpec defines the desired state of EC2Instance
             properties:
-              imageId:
-                type: string
+              imageID:
+                properties:
+                  value:
+                    type: string
+                  valueFrom:
+                    properties:
+                      configMap:
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      krakenResource:
+                        properties:
+                          kind:
+                            type: string
+                          name:
+                            type: string
+                          path:
+                            type: string
+                        required:
+                        - kind
+                        - name
+                        - path
+                        type: object
+                      secret:
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                    type: object
+                type: object
               instanceType:
-                type: string
+                properties:
+                  value:
+                    type: string
+                  valueFrom:
+                    properties:
+                      configMap:
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      krakenResource:
+                        properties:
+                          kind:
+                            type: string
+                          name:
+                            type: string
+                          path:
+                            type: string
+                        required:
+                        - kind
+                        - name
+                        - path
+                        type: object
+                      secret:
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                    type: object
+                type: object
               maxCount:
-                minimum: 1
-                type: integer
+                properties:
+                  value:
+                    type: integer
+                  valueFrom:
+                    properties:
+                      configMap:
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      krakenResource:
+                        properties:
+                          kind:
+                            type: string
+                          name:
+                            type: string
+                          path:
+                            type: string
+                        required:
+                        - kind
+                        - name
+                        - path
+                        type: object
+                      secret:
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                    type: object
+                type: object
               minCount:
-                minimum: 1
-                type: integer
+                properties:
+                  value:
+                    type: integer
+                  valueFrom:
+                    properties:
+                      configMap:
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                      krakenResource:
+                        properties:
+                          kind:
+                            type: string
+                          name:
+                            type: string
+                          path:
+                            type: string
+                        required:
+                        - kind
+                        - name
+                        - path
+                        type: object
+                      secret:
+                        properties:
+                          key:
+                            type: string
+                          name:
+                            type: string
+                        required:
+                        - key
+                        - name
+                        type: object
+                    type: object
+                type: object
               tags:
                 additionalProperties:
                   type: string
                 type: object
             required:
-            - imageId
+            - imageID
             - instanceType
             - maxCount
             - minCount

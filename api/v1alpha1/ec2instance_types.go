@@ -17,6 +17,10 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"reflect"
+
+	"github.com/kraken-iac/aws-ec2-instance/pkg/option"
+	"github.com/kraken-iac/kraken/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -25,17 +29,30 @@ import (
 
 // EC2InstanceSpec defines the desired state of EC2Instance
 type EC2InstanceSpec struct {
-	ImageId      string `json:"imageId"`
-	InstanceType string `json:"instanceType"`
-
-	//+kubebuilder:validation:Minimum=1
-	MaxCount int `json:"maxCount"`
-
-	//+kubebuilder:validation:Minimum=1
-	MinCount int `json:"minCount"`
+	ImageID      option.String `json:"imageID"`
+	InstanceType option.String `json:"instanceType"`
+	MaxCount     option.Int    `json:"maxCount"`
+	MinCount     option.Int    `json:"minCount"`
 
 	// +optional
 	Tags map[string]string `json:"tags,omitempty"`
+}
+
+func (s EC2InstanceSpec) GenerateDependencyRequestSpec() v1alpha1.DependencyRequestSpec {
+	dr := v1alpha1.DependencyRequestSpec{}
+	if s.ImageID.ValueFrom != nil {
+		s.ImageID.ValueFrom.AddToDependencyRequestSpec(&dr, reflect.String)
+	}
+	if s.InstanceType.ValueFrom != nil {
+		s.InstanceType.ValueFrom.AddToDependencyRequestSpec(&dr, reflect.String)
+	}
+	if s.MaxCount.ValueFrom != nil {
+		s.MaxCount.ValueFrom.AddToDependencyRequestSpec(&dr, reflect.Int)
+	}
+	if s.MinCount.ValueFrom != nil {
+		s.MinCount.ValueFrom.AddToDependencyRequestSpec(&dr, reflect.Int)
+	}
+	return dr
 }
 
 // EC2InstanceStatus defines the observed state of EC2Instance
