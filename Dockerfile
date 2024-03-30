@@ -15,6 +15,7 @@ RUN go mod download
 COPY cmd/main.go cmd/main.go
 COPY api/ api/
 COPY pkg/ec2instance_client/ pkg/ec2instance_client/
+COPY pkg/option/ pkg/option/
 COPY internal/controller/ internal/controller/
 
 # Build

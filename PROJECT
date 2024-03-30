@@ -17,4 +17,7 @@ resources:
   kind: EC2Instance
   path: github.com/kraken-iac/aws-ec2-instance/api/v1alpha1
   version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
 version: "3"

@@ -33,10 +33,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
+	krakenv1alpha1 "github.com/kraken-iac/kraken/api/v1alpha1"
+
 	awsv1alpha1 "github.com/kraken-iac/aws-ec2-instance/api/v1alpha1"
 	"github.com/kraken-iac/aws-ec2-instance/internal/controller"
 	ec2instanceclient "github.com/kraken-iac/aws-ec2-instance/pkg/ec2instance_client"
-	krakenv1alpha1 "github.com/kraken-iac/kraken/api/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -106,6 +107,12 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "EC2Instance")
 		os.Exit(1)
+	}
+	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
+		if err = (&awsv1alpha1.EC2Instance{}).SetupWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create webhook", "webhook", "EC2Instance")
+			os.Exit(1)
+		}
 	}
 	//+kubebuilder:scaffold:builder
 
