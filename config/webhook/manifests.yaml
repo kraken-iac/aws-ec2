@@ -1,0 +1,26 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-aws-kraken-iac-eoinfennessy-com-v1alpha1-ec2instance
+  failurePolicy: Fail
+  name: vec2instance.kb.io
+  rules:
+  - apiGroups:
+    - aws.kraken-iac.eoinfennessy.com
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - ec2instances
+  sideEffects: None

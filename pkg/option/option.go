@@ -30,9 +30,17 @@ import (
 	krakenv1alpha1 "github.com/kraken-iac/kraken/api/v1alpha1"
 )
 
+var (
+	validationErrNoValueOrRef    = errors.New("neither value reference nor concrete value provided")
+	validationErrBothValueAndRef = errors.New("both value reference and concrete value provided")
+)
+
 type ValueFromConfigMap struct {
+	// +kubebuilder:validation:Required
 	Name string `json:"name"`
-	Key  string `json:"key"`
+
+	// +kubebuilder:validation:Required
+	Key string `json:"key"`
 }
 
 func (vfcm ValueFromConfigMap) ToConfigMapDependency() krakenv1alpha1.ConfigMapDependency {
@@ -42,9 +50,22 @@ func (vfcm ValueFromConfigMap) ToConfigMapDependency() krakenv1alpha1.ConfigMapD
 	}
 }
 
+func (vfcm ValueFromConfigMap) Validate() error {
+	if vfcm.Name == "" {
+		return errors.New("ConfigMap name cannot be empty")
+	}
+	if vfcm.Key == "" {
+		return errors.New("ConfigMap key cannot be empty")
+	}
+	return nil
+}
+
 type ValueFromSecret struct {
+	// +kubebuilder:validation:Required
 	Name string `json:"name"`
-	Key  string `json:"key"`
+
+	// +kubebuilder:validation:Required
+	Key string `json:"key"`
 }
 
 func (vfs ValueFromSecret) ToSecretDependency() {
@@ -52,8 +73,13 @@ func (vfs ValueFromSecret) ToSecretDependency() {
 }
 
 type ValueFromKrakenResource struct {
+	// +kubebuilder:validation:Required
 	Kind string `json:"kind"`
+
+	// +kubebuilder:validation:Required
 	Name string `json:"name"`
+
+	// +kubebuilder:validation:Required
 	Path string `json:"path"`
 }
 
@@ -84,6 +110,23 @@ func (vf ValueFrom) AddToDependencyRequestSpec(dr *krakenv1alpha1.DependencyRequ
 	}
 }
 
+func (vf ValueFrom) Validate() error {
+	nonNilCount := 0
+	if vf.ConfigMap != nil {
+		nonNilCount++
+	}
+	if vf.Secret != nil {
+		nonNilCount++
+	}
+	if vf.KrakenResource != nil {
+		nonNilCount++
+	}
+	if nonNilCount != 1 {
+		return fmt.Errorf("expected a single value reference but received %d", nonNilCount)
+	}
+	return nil
+}
+
 type String struct {
 	Value     *string    `json:"value,omitempty"`
 	ValueFrom *ValueFrom `json:"valueFrom,omitempty"`
@@ -103,6 +146,20 @@ func (s String) ToApplicableValue(dv krakenv1alpha1.DependentValues) (*string, e
 		return getValueFromKrakenResource[string](s.ValueFrom.KrakenResource, dv.FromKrakenResources)
 	}
 	return nil, errors.New("ValueFrom object is not nil but does not contain any non-nil pointer references")
+}
+
+func (s String) Validate() error {
+	if s.Value != nil {
+		if s.ValueFrom != nil {
+			return validationErrBothValueAndRef
+		}
+		return nil
+	} else {
+		if s.ValueFrom == nil {
+			return validationErrNoValueOrRef
+		}
+	}
+	return s.ValueFrom.Validate()
 }
 
 type Int struct {
@@ -138,6 +195,20 @@ func (i Int) ToApplicableValue(dv krakenv1alpha1.DependentValues) (*int, error) 
 		return &val, nil
 	}
 	return nil, errors.New("ValueFrom object is not nil but does not contain any non-nil pointer references")
+}
+
+func (i Int) Validate() error {
+	if i.Value != nil {
+		if i.ValueFrom != nil {
+			return validationErrBothValueAndRef
+		}
+		return nil
+	} else {
+		if i.ValueFrom == nil {
+			return validationErrNoValueOrRef
+		}
+	}
+	return i.ValueFrom.Validate()
 }
 
 func getValueFromConfigMap(cmRef *ValueFromConfigMap, cmVals krakenv1alpha1.DependentValuesFromConfigMaps) (*string, error) {
