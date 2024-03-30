@@ -29,7 +29,7 @@ func New(ctx context.Context, region string) (*ec2InstanceClient, error) {
 type RunInstancesInput struct {
 	MaxCount     int
 	MinCount     int
-	ImageId      string
+	ImageID      string
 	InstanceType string
 	Tags         map[string]string
 }
@@ -46,7 +46,7 @@ func (c ec2InstanceClient) RunInstances(ctx context.Context, params *RunInstance
 	output, err := c.ec2Client.RunInstances(ctx, &ec2.RunInstancesInput{
 		MaxCount:          aws.Int32(int32(params.MaxCount)),
 		MinCount:          aws.Int32(int32(params.MinCount)),
-		ImageId:           aws.String(params.ImageId),
+		ImageId:           aws.String(params.ImageID),
 		InstanceType:      types.InstanceType(params.InstanceType),
 		TagSpecifications: tagSpecs,
 	})

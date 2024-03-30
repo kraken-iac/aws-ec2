@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 
 	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -36,7 +37,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
-	awsv1alpha1 "github.com/kraken-iac/aws-ec2-instance/api/v1alpha1"
+	ec2instancev1alpha1 "github.com/kraken-iac/aws-ec2-instance/api/v1alpha1"
 	ec2instanceclient "github.com/kraken-iac/aws-ec2-instance/pkg/ec2instance_client"
 	krakenv1alpha1 "github.com/kraken-iac/kraken/api/v1alpha1"
 )
@@ -46,6 +47,8 @@ const (
 
 	nameTagKey      string = "kraken-name"
 	namespaceTagKey string = "kraken-namespace"
+
+	externalResourcePrefix string = "ec2instance"
 
 	conditionTypeReady string = "Ready"
 )
@@ -69,6 +72,7 @@ type EC2InstanceReconciler struct {
 //+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2instances/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=aws.kraken-iac.eoinfennessy.com,resources=ec2instances/finalizers,verbs=update
 //+kubebuilder:rbac:groups=core.kraken-iac.eoinfennessy.com,resources=statedeclarations,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core.kraken-iac.eoinfennessy.com,resources=dependencyrequests,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -85,7 +89,7 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	log.Info("Reconcile triggered")
 
 	// Fetch ec2Instance resource
-	ec2Instance := &awsv1alpha1.EC2Instance{}
+	ec2Instance := &ec2instancev1alpha1.EC2Instance{}
 	if err := r.Client.Get(ctx, req.NamespacedName, ec2Instance); err != nil {
 		if apierrors.IsNotFound(err) {
 			log.Info("ec2Instance resource not found: Ignoring because it must have been deleted")
@@ -153,6 +157,129 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, nil
 	}
 
+	// Construct DependencyRequest spec
+	newDependencyRequestSpec := ec2Instance.Spec.GenerateDependencyRequestSpec()
+
+	// Fetch existing DependencyRequest if one exists
+	oldDependencyRequest := &krakenv1alpha1.DependencyRequest{}
+	var oldDependencyRequestExists bool
+	if err := r.Client.Get(
+		ctx,
+		client.ObjectKey{
+			Name:      fmt.Sprintf("%s-%s", externalResourcePrefix, req.Name),
+			Namespace: req.Namespace,
+		},
+		oldDependencyRequest,
+	); err != nil {
+		if apierrors.IsNotFound(err) {
+			oldDependencyRequestExists = false
+		} else {
+			log.Error(err, "Failed to fetch DependencyRequest resource: Requeuing")
+			return ctrl.Result{}, err
+		}
+	} else {
+		oldDependencyRequestExists = true
+	}
+
+	// Delete old DependencyRequest if new DependencyRequest has no dependencies
+	if !newDependencyRequestSpec.HasDependencies() && oldDependencyRequestExists {
+		if err := r.Delete(ctx, oldDependencyRequest); err != nil {
+			log.Error(err, "Failed to delete DependencyRequest")
+			return ctrl.Result{}, client.IgnoreNotFound(err)
+		}
+		log.Info("Deleted DependencyRequest")
+		return ctrl.Result{}, nil
+	}
+
+	if newDependencyRequestSpec.HasDependencies() {
+		// Create DependencyRequest
+		if !oldDependencyRequestExists {
+			dependencyRequest := &krakenv1alpha1.DependencyRequest{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("%s-%s", externalResourcePrefix, req.Name),
+					Namespace: req.Namespace,
+				},
+				Spec: newDependencyRequestSpec,
+			}
+
+			if err := controllerutil.SetControllerReference(
+				ec2Instance,
+				dependencyRequest,
+				r.Scheme); err != nil {
+				log.Error(err, "Failed to set owner reference on StateDeclaration")
+				return reconcile.Result{}, err
+			}
+
+			log.Info("Creating DependencyRequest", "name", dependencyRequest.ObjectMeta.Name)
+			if err := r.Client.Create(ctx, dependencyRequest); err != nil {
+				if apierrors.IsAlreadyExists(err) {
+					log.Info("DependencyRequest already exists")
+					return ctrl.Result{Requeue: true}, nil
+				}
+				log.Error(err, "Error creating DependencyRequest", "name", dependencyRequest.ObjectMeta.Name)
+				return ctrl.Result{}, err
+			}
+			// TODO: Update status conditions to include DependencyRequest info
+			return ctrl.Result{}, nil
+		}
+
+		// Update DependencyRequest if old and new specs are different
+		if !reflect.DeepEqual(oldDependencyRequest.Spec, newDependencyRequestSpec) {
+			updatedDependencyRequest := oldDependencyRequest.DeepCopy()
+			updatedDependencyRequest.Spec = newDependencyRequestSpec
+
+			log.Info("Updating DependencyRequest", "name", updatedDependencyRequest.ObjectMeta.Name)
+			if err := r.Client.Update(ctx, updatedDependencyRequest); err != nil {
+				log.Error(err, "Could not update DependencyRequest", "name", updatedDependencyRequest.ObjectMeta.Name)
+				return ctrl.Result{}, err
+			}
+			// TODO: Update status conditions to include DependencyRequest info
+			return ctrl.Result{}, nil
+		}
+
+		// Return without requeue if DependencyRequest is not ready
+		if !meta.IsStatusConditionTrue(
+			oldDependencyRequest.Status.Conditions,
+			krakenv1alpha1.ConditionTypeReady,
+		) {
+			log.Info("DependencyRequest is not yet ready")
+			dependencyRequestCondition := meta.FindStatusCondition(
+				oldDependencyRequest.Status.Conditions,
+				krakenv1alpha1.ConditionTypeReady,
+			)
+			if dependencyRequestCondition == nil {
+				log.Info("DependencyRequest's status conditions are not yet set")
+				return ctrl.Result{Requeue: true}, nil
+			}
+			meta.SetStatusCondition(
+				&ec2Instance.Status.Conditions,
+				metav1.Condition{
+					Type:    conditionTypeReady,
+					Status:  metav1.ConditionFalse,
+					Reason:  "MissingDependency",
+					Message: dependencyRequestCondition.Message,
+				},
+			)
+			return ctrl.Result{}, r.Status().Update(ctx, ec2Instance)
+		}
+	}
+
+	// Construct applicableValues object containing the actual values that will be applied
+	av, err := toApplicableValues(ec2Instance.Spec, oldDependencyRequest.Status.DependentValues)
+	if err != nil {
+		log.Error(err, "Could not construct applicable values")
+		meta.SetStatusCondition(
+			&ec2Instance.Status.Conditions,
+			metav1.Condition{
+				Type:    conditionTypeReady,
+				Status:  metav1.ConditionFalse,
+				Reason:  "DependencyError",
+				Message: fmt.Sprintf("Could not construct applicable values: %s", err),
+			},
+		)
+		return ctrl.Result{}, r.Status().Update(ctx, ec2Instance)
+	}
+
 	// Get running and pending instances matching name and namespace tags
 	log.Info("Retrieving EC2 instances", "name", req.Name, "namespace", req.Namespace)
 	instances, err := r.EC2InstanceClient.GetInstances(ctx, ec2instanceclient.FilterOptions{
@@ -182,9 +309,9 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// TODO: compare all instances to spec and either update (if possible) or terminate those that do not match (update list)
 
 	// Scale down
-	if len(instances) > ec2Instance.Spec.MaxCount {
+	if len(instances) > av.maxCount {
 		log.Info("Scaling down EC2 instances")
-		terminationCount := len(instances) - ec2Instance.Spec.MaxCount
+		terminationCount := len(instances) - av.maxCount
 		if _, err := r.EC2InstanceClient.TerminateInstances(ctx, instances[:terminationCount]); err != nil {
 			log.Error(err, "Failed to terminate EC2 instances")
 			meta.SetStatusCondition(
@@ -201,13 +328,13 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	// Scale up
-	if len(instances) < ec2Instance.Spec.MaxCount {
+	if len(instances) < av.maxCount {
 		log.Info("Scaling up EC2 instances")
 
 		maxCount, minCount := adjustMaxMinInstanceCount(
 			len(instances),
-			ec2Instance.Spec.MaxCount,
-			ec2Instance.Spec.MinCount,
+			av.maxCount,
+			av.minCount,
 		)
 
 		tags := makeInstanceTags(req, ec2Instance.Spec.Tags)
@@ -215,8 +342,8 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		o, err := r.EC2InstanceClient.RunInstances(ctx, &ec2instanceclient.RunInstancesInput{
 			MaxCount:     maxCount,
 			MinCount:     minCount,
-			ImageId:      ec2Instance.Spec.ImageId,
-			InstanceType: ec2Instance.Spec.InstanceType,
+			ImageID:      av.imageID,
+			InstanceType: av.instanceType,
 			Tags:         tags,
 		})
 		if err != nil {
@@ -235,6 +362,7 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.Info("Created instances", "instanceCount", len(o.Instances))
 
 		// Wait for pending instances to reach running state
+		log.Info("Waiting for pending instances to reach running state")
 		if err := r.WaitUntilRunning(
 			ctx,
 			ec2instanceclient.FilterOptions{
@@ -247,6 +375,7 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 					types.InstanceStateNameRunning,
 				},
 			},
+			// TODO: Make this time configurable
 			time.Minute*2,
 		); err != nil {
 			log.Error(err, "Encountered error waiting for running state")
@@ -298,7 +427,7 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// Create or update StateDeclaration
 	stateDeclaration := &krakenv1alpha1.StateDeclaration{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "ec2-" + req.Name,
+			Name:      fmt.Sprintf("%s-%s", externalResourcePrefix, req.Name),
 			Namespace: req.Namespace,
 		},
 	}
@@ -354,7 +483,7 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 }
 
 func (r *EC2InstanceReconciler) doFinalizerOperations(
-	ctx context.Context, req ctrl.Request, ec2Instance *awsv1alpha1.EC2Instance,
+	ctx context.Context, req ctrl.Request, ec2Instance *ec2instancev1alpha1.EC2Instance,
 ) error {
 	log := log.FromContext(ctx)
 
@@ -370,10 +499,12 @@ func (r *EC2InstanceReconciler) doFinalizerOperations(
 		return err
 	}
 
-	log.Info("Terminating EC2 instances")
-	if _, err := r.EC2InstanceClient.TerminateInstances(ctx, instances); err != nil {
-		log.Error(err, "Failed to terminate EC2 instances")
-		return err
+	if len(instances) > 0 {
+		log.Info("Terminating EC2 instances")
+		if _, err := r.EC2InstanceClient.TerminateInstances(ctx, instances); err != nil {
+			log.Error(err, "Failed to terminate EC2 instances")
+			return err
+		}
 	}
 
 	r.Recorder.Event(ec2Instance, "Warning", "Deleting",
@@ -387,8 +518,9 @@ func (r *EC2InstanceReconciler) doFinalizerOperations(
 // SetupWithManager sets up the controller with the Manager.
 func (r *EC2InstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&awsv1alpha1.EC2Instance{}).
+		For(&ec2instancev1alpha1.EC2Instance{}).
 		Owns(&krakenv1alpha1.StateDeclaration{}).
+		Owns(&krakenv1alpha1.DependencyRequest{}).
 		Complete(r)
 }
 
@@ -412,11 +544,11 @@ func makeInstanceTags(req reconcile.Request, specTags map[string]string) map[str
 	return tags
 }
 
-func isMarkedForDeletion(ec2Instance *awsv1alpha1.EC2Instance) bool {
+func isMarkedForDeletion(ec2Instance *ec2instancev1alpha1.EC2Instance) bool {
 	return ec2Instance.DeletionTimestamp != nil
 }
 
-func constructStateDeclarationData(ec2Instance awsv1alpha1.EC2Instance, instances []types.Instance) (*v1.JSON, error) {
+func constructStateDeclarationData(ec2Instance ec2instancev1alpha1.EC2Instance, instances []types.Instance) (*v1.JSON, error) {
 	dataMap := make(map[string]interface{})
 	dataMap["instances"] = instances
 	dataMap["spec"] = ec2Instance.Spec

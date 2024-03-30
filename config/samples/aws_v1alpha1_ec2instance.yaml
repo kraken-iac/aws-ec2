@@ -9,7 +9,25 @@ metadata:
     app.kubernetes.io/created-by: aws-ec2-instance
   name: ec2instance-sample
 spec:
-  imageId: "ami-0277155c3f0ab2930"
-  instanceType: "t2.nano"
-  maxCount: 1
-  minCount: 1
+  imageID:
+    valueFrom:
+      configMap:
+        name: my-ec2-config
+        key: imageID
+  instanceType:
+    valueFrom:
+      krakenResource:
+        kind: ec2instance
+        name: my-instance
+        path: instances.0.instanceType
+  maxCount:
+    valueFrom:
+      configMap:
+        name: my-ec2-config
+        key: maxCount
+  minCount:
+    valueFrom:
+      krakenResource:
+        kind: ec2instance
+        name: my-instance
+        path: instances.0.minCount
