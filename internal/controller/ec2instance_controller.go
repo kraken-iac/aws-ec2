@@ -39,7 +39,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	ec2instancev1alpha1 "github.com/kraken-iac/aws-ec2-instance/api/v1alpha1"
 	ec2instanceclient "github.com/kraken-iac/aws-ec2-instance/pkg/ec2instance_client"
-	krakenv1alpha1 "github.com/kraken-iac/kraken/api/v1alpha1"
+	krakenv1alpha1 "github.com/kraken-iac/kraken/api/core/v1alpha1"
 )
 
 const (

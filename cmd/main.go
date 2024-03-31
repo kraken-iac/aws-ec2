@@ -33,7 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	krakenv1alpha1 "github.com/kraken-iac/kraken/api/v1alpha1"
+	krakenv1alpha1 "github.com/kraken-iac/kraken/api/core/v1alpha1"
 
 	awsv1alpha1 "github.com/kraken-iac/aws-ec2-instance/api/v1alpha1"
 	"github.com/kraken-iac/aws-ec2-instance/internal/controller"
