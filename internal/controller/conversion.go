@@ -20,7 +20,7 @@ import (
 	"fmt"
 
 	"github.com/kraken-iac/aws-ec2-instance/api/v1alpha1"
-	krakenv1alpha1 "github.com/kraken-iac/kraken/api/v1alpha1"
+	krakenv1alpha1 "github.com/kraken-iac/kraken/api/core/v1alpha1"
 )
 
 type ec2InstanceApplicableValues struct {
