@@ -6,7 +6,7 @@ import (
 
 	"github.com/kraken-iac/aws-ec2-instance/api/v1alpha1"
 	mockec2instanceclient "github.com/kraken-iac/aws-ec2-instance/pkg/mock_ec2instance_client"
-	"github.com/kraken-iac/aws-ec2-instance/pkg/option"
+	"github.com/kraken-iac/common/types/option"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
