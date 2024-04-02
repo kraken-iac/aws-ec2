@@ -206,7 +206,7 @@ func (r *EC2InstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				ec2Instance,
 				dependencyRequest,
 				r.Scheme); err != nil {
-				log.Error(err, "Failed to set owner reference on StateDeclaration")
+				log.Error(err, "Failed to set owner reference on DependencyRequest")
 				return reconcile.Result{}, err
 			}
 
